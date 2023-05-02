@@ -1,0 +1,527 @@
+---
+title: "Beer Consumption"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(readxl)
+library(ggplot2)
+library(plotly)
+library(scales)
+library(dplyr)
+library(zoo)
+
+beer_data <- read_excel('/Users/garretthollenbeck/Desktop/Grad School/MBA Classes/OM Project/BeerForecasting.xlsx', sheet = "Table A3")
+tourist_data <- read_excel('/Users/garretthollenbeck/Desktop/Grad School/MBA Classes/OM Project/BeerForecasting.xlsx', sheet = "Table A4")
+
+#this clears all extra information around our data in excel
+colnames(beer_data) <- beer_data[2,]
+beer_data <- beer_data[-c(1,2,87,88,89,90,91),]
+
+colnames(tourist_data) <- tourist_data[2,]
+tourist_data <- tourist_data[-c(1,2),]
+
+#Changing columns with numbers to numeric
+beer_data <- beer_data %>% 
+  mutate_at(c(3:8), as.numeric)
+
+tourist_data <- tourist_data %>% 
+  mutate_at(c(3:8), as.numeric)
+
+#creates average tourism by month
+tourist_demand_month <- tourist_data %>%
+  group_by(Month) %>%
+  mutate(avg_tourism_month = mean(Czechoslovakia+Germany+`The United Kingdom`+`The United States`+France+`Others (Total)`)) %>%
+  summarise(avg_tourism_month = mean(Czechoslovakia+Germany+`The United Kingdom`+`The United States`+France+`Others (Total)`)) %>%
+  mutate(Month = factor(Month, levels = month.name)) %>%
+  arrange(Month)
+
+#this identifies the months where Ramadan had more than 5 days during a given month
+beer_data$Ramadan <-  c(NA, NA, NA, NA, 1, NA, NA, NA, NA, NA, NA, NA,
+                        NA, NA, NA, 1, 1, NA, NA, NA, NA, NA, NA, NA,
+                        NA, NA, NA, 1, NA, NA, NA, NA, NA, NA, NA, NA,
+                        NA, NA, NA, 1, NA, NA, NA, NA, NA, NA, NA, NA,
+                        NA, NA, 1, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                        NA, NA, 1, 1, NA, NA, NA, NA, NA, NA, NA, NA,
+                        NA, 1, 1, NA, NA, NA, NA, NA, NA, NA, NA, NA)
+
+#beer data price by month
+beer_data_month <- beer_data %>%
+  group_by(Month) %>%
+  mutate(avg_beer_price = mean(`Average Beer Price*`)) %>%
+  summarise(avg_beer_price = mean(`Average Beer Price*`)) %>%
+  mutate(Month = factor(Month, levels = month.name)) %>%
+  arrange(Month)
+
+#raki price data by month 
+raki_data_month <- beer_data %>%
+  group_by(Month) %>%
+  mutate(avg_raki_price = mean(`Average Raki Price*`)) %>%
+  summarise(avg_raki_price = mean(`Average Raki Price*`)) %>%
+  mutate(Month = factor(Month, levels = month.name)) %>%
+  arrange(Month)
+
+#soft drink price data by month
+soft_data_month <- beer_data %>%
+  group_by(Month) %>%
+  mutate(avg_soft_price = mean(`Average Canned Soft Drink Price*`)) %>%
+  summarise(avg_soft_price = mean(`Average Canned Soft Drink Price*`)) %>%
+  mutate(Month = factor(Month, levels = month.name)) %>%
+  arrange(Month)
+
+# Join the three data frames, rename columns, and reorder the months
+combined_data <- left_join(beer_data_month, raki_data_month, by = "Month") %>%
+  left_join(soft_data_month, by = "Month")
+
+colnames(combined_data) <- c("Month", "Average Beer Price", "Average Raki Price", "Average Soft Drink Price")
+
+combined_data$Month <- factor(combined_data$Month, levels = month.name)
+
+#creating a combined data set and mutating the year column so it can be used as overall data
+beer_data_2 <- beer_data %>% 
+  mutate(combined_date = paste(Year, Month)) %>% 
+  mutate(date = as.yearmon(combined_date, "%Y %B"))
+
+beer_data_3 <- beer_data_2 %>%
+  mutate(Year = 'Overall')
+
+overall_data <- rbind(beer_data_2, beer_data_3)
+
+##############################################
+#PREDICTIVE
+##############################################
+
+beer_data <- read_excel('/Users/garretthollenbeck/Desktop/Grad School/MBA Classes/OM Project/BeerForecasting.xlsx', sheet = "Table A3")
+tourist_data <- read_excel('/Users/garretthollenbeck/Desktop/Grad School/MBA Classes/OM Project/BeerForecasting.xlsx', sheet = "Table A4")
+
+colnames(beer_data) <- beer_data[2,]
+beer_data <- beer_data[-c(1,2,87,88,89,90,91),]
+
+colnames(tourist_data) <- tourist_data[2,]
+tourist_data <- tourist_data[-c(1,2),]
+
+
+
+#Changing columns with numbers to numeric
+beer_data <- beer_data %>% 
+  mutate_at(c(3:8), as.numeric)
+
+tourist_data <- tourist_data %>% 
+  mutate_at(c(3:8), as.numeric)
+
+#Ramadan Matrix
+beer_data$Ramadan <-  c(NA, NA, NA, NA, 1, NA, NA, NA, NA, NA, NA, NA,
+                        NA, NA, NA, 1, 1, NA, NA, NA, NA, NA, NA, NA,
+                        NA, NA, NA, 1, NA, NA, NA, NA, NA, NA, NA, NA,
+                        NA, NA, NA, 1, NA, NA, NA, NA, NA, NA, NA, NA,
+                        NA, NA, 1, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                        NA, NA, 1, 1, NA, NA, NA, NA, NA, NA, NA, NA,
+                        NA, 1, 1, NA, NA, NA, NA, NA, NA, NA, NA, NA)
+
+
+### PREDICTIVE ###
+# #creating a combined data set and mutating the year column so it can be used as overall data
+beer_data_2 <- beer_data %>% 
+  mutate(combined_date = paste(Year, Month)) %>% 
+  mutate(date = as.yearmon(combined_date, "%Y %B"))
+
+#total tourism volume by row and create combined date column
+tourist_data_totaled <- tourist_data %>%
+  group_by(Year, Month) %>% 
+  mutate(tourist_sum = sum(Czechoslovakia + Germany + `The United Kingdom` + `The United States` + France +`Others (Total)`, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(combined_date = paste(Year, Month)) %>% 
+  mutate(date = as.yearmon(combined_date, "%Y %B"))
+
+tourist_data_2 <- tourist_data_totaled
+
+#merge tourism and beer data
+all_data <- merge(x = beer_data_2, y = tourist_data_2,
+                  by = "date",
+                  all.x= TRUE) %>%
+  mutate(Time = row_number())
+
+#Ramadan variable factored 
+all_data$Ramadan <-  c(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+#Seasonality variable factored
+all_data$Seasonality <- factor(c(1,2,3,4,5,6,7,8,9,10,11,12))
+
+
+#MAPE calculator 
+mape_calc <- function(x_vector, y_vector){
+  mape_value <- mean(abs((x_vector - y_vector) / x_vector))*100
+  return(mape_value)
+}
+
+
+#regression models additive 
+beer_regression <- lm(`Beer Consumption  (lt)` ~ Time + factor(Ramadan) + factor(Seasonality), data = all_data)
+summary(beer_regression)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression))
+#MAPE = 12.1934%
+
+beer_regression_tourism <- lm(`Beer Consumption  (lt)` ~ Time + factor(Ramadan) + factor(Seasonality) + tourist_sum, data = all_data)
+summary(beer_regression_tourism)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_tourism))
+#MAPE = 10.47227%
+
+beer_regression_beerprice <- lm(`Beer Consumption  (lt)` ~ Time + factor(Ramadan) + factor(Seasonality) + `Average Beer Price*`, data = all_data)
+summary(beer_regression_beerprice)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_beerprice))
+#MAPE = 11.70291$
+
+beer_regression_rakiprice <- lm(`Beer Consumption  (lt)` ~ Time + factor(Ramadan) + factor(Seasonality) + `Average Raki Price*`, data = all_data)
+summary(beer_regression_rakiprice)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_rakiprice))
+#MAPE = 12.24007%
+
+beer_regression_softdrinkprice <- lm(`Beer Consumption  (lt)` ~ Time + factor(Ramadan) + factor(Seasonality) + `Average Canned Soft Drink Price*`, data = all_data)
+summary(beer_regression_softdrinkprice)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_softdrinkprice))
+#MAPE = 11.9981%
+
+beer_regression_allprices <- lm(`Beer Consumption  (lt)` ~ Time + factor(Ramadan) +
+                                  factor(Seasonality) +
+                                  `Average Beer Price*` +
+                                  `Average Raki Price*` +
+                                  `Average Canned Soft Drink Price*`, data = all_data)
+summary(beer_regression_allprices)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_allprices))
+#MAPE = 11.49168%
+
+beer_regression_allvariables <- lm(`Beer Consumption  (lt)` ~ Time + 
+                                     factor(Ramadan) + 
+                                     factor(Seasonality) + 
+                                     tourist_sum + 
+                                     `Average Beer Price*` +
+                                     `Average Raki Price*` +
+                                     `Average Canned Soft Drink Price*`, data = all_data)
+summary(beer_regression_allvariables)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_allvariables))
+#MAPE = 9.930928%
+
+#regression models multiplicative 
+beer_regression_mult <- lm(`Beer Consumption  (lt)` ~ Time * factor(Ramadan) * factor(Seasonality), data = all_data)
+summary(beer_regression_mult)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_mult))
+#MAPE = 6.0836%
+
+beer_regression_tourism_mult <- lm(`Beer Consumption  (lt)` ~ Time * factor(Ramadan) * factor(Seasonality) * tourist_sum, data = all_data)
+summary(beer_regression_tourism_mult)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_tourism_mult))
+#MAPE = 3.0814%
+
+beer_regression_beerprice_mult <- lm(`Beer Consumption  (lt)` ~ Time * factor(Ramadan) * factor(Seasonality) * `Average Beer Price*`, data = all_data)
+summary(beer_regression_beerprice_mult)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_beerprice_mult))
+#MAPE = 2.7895%
+
+beer_regression_beerprice_tourism_mult <- lm(`Beer Consumption  (lt)` ~ Time * factor(Ramadan) * factor(Seasonality) * `Average Beer Price*` * tourist_sum, data = all_data)
+summary(beer_regression_beerprice_tourism_mult)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_beerprice_tourism_mult))
+#MAPE = 3.9569x10^-9
+
+beer_regression_rakiprice_mult <- lm(`Beer Consumption  (lt)` ~ Time * factor(Ramadan) * factor(Seasonality) * `Average Raki Price*`, data = all_data)
+summary(beer_regression_rakiprice_mult)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_rakiprice_mult))
+#MAPE = 3.2229%
+
+beer_regression_softdrinkprice_mult <- lm(`Beer Consumption  (lt)` ~ Time * factor(Ramadan) * factor(Seasonality) * `Average Canned Soft Drink Price*`, data = all_data)
+summary(beer_regression_softdrinkprice_mult)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_softdrinkprice_mult))
+#MAPE = 3.3233%
+
+beer_regression_allprices_mult <- lm(`Beer Consumption  (lt)` ~ Time * factor(Ramadan) *
+                                       factor(Seasonality) *
+                                       `Average Beer Price*` *
+                                       `Average Raki Price*` *
+                                       `Average Canned Soft Drink Price*`, data = all_data)
+summary(beer_regression_allprices_mult)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_allprices_mult))
+#MAPE = 9.4504x10^-12%
+
+beer_regression_allvariables_mult <- lm(`Beer Consumption  (lt)` ~ Time * 
+                                          factor(Ramadan) *
+                                          factor(Seasonality) *
+                                          tourist_sum *
+                                          `Average Beer Price*` *
+                                          `Average Raki Price*` *
+                                          `Average Canned Soft Drink Price*`, data = all_data)
+summary(beer_regression_allvariables_mult)
+mape_calc(all_data$`Beer Consumption  (lt)`, predict(beer_regression_allvariables_mult))
+#MAPE = 1.3124x10^-11 
+
+#Method 1 additive 
+
+beer_price_regression <- lm(`Average Beer Price*` ~ Time + factor(Ramadan) + factor(Seasonality), data = all_data)
+summary(beer_price_regression)
+mape_calc(all_data$`Average Beer Price*`, predict(beer_price_regression))
+#MAPE = 4.6687%
+
+bpf1 <- data.frame(Time = 85, Ramadan = 0, Seasonality = 1)
+predict(beer_price_regression, newdata = bpf1)
+#bpf1 = 1290.221
+bcf1 <- tibble(Time = 85, Ramadan = 0, Seasonality = 1,`Average Beer Price*` = 1290.221)
+predict(beer_regression_beerprice_mult, newdata = bcf1, interval = "confidence", level = 0.95)
+#bcf1 = 22007551; 26671195; 31334839
+
+bpf2 <- data.frame(Time = 86, Ramadan = 1, Seasonality = 2)
+predict(beer_price_regression, newdata = bpf2)
+#bpf2 = 1185.616
+bcf2 <- tibble(Time = 86, Ramadan = 1, Seasonality = 2, `Average Beer Price*` = 1185.616)
+predict(beer_regression_beerprice_mult, newdata = bcf2, interval = "confidence", level = 0.95)
+#bcf2 = -37693147; 10570184; 58833515
+
+bpf3 <- data.frame(Time = 87, Ramadan = 1, Seasonality = 3)
+predict(beer_price_regression, newdata = bpf3)
+#bpf3 = 1182.357
+bcf3 <- tibble(Time = 87, Ramadan = 1, Seasonality = 3, `Average Beer Price*` = 1182.357)
+predict(beer_regression_beerprice_mult, newdata = bcf3, interval = "confidence", level = 0.95)
+#bcf3 = 32370330; 41235602; 50100873
+
+bpf4 <- data.frame(Time = 88, Ramadan = 0, Seasonality = 4)
+predict(beer_price_regression, newdata = bpf4)
+#bpf4 = 1353.013
+bcf4 <- tibble(Time = 88, Ramadan = 0, Seasonality = 4, `Average Beer Price*` = 1353.013)
+predict(beer_regression_beerprice_mult, newdata = bcf4, interval = "confidence", level = 0.95)
+#bcf4 = 30954965; 40200026; 49445088
+
+bpf5 <- data.frame(Time = 89, Ramadan = 0, Seasonality = 5)
+predict(beer_price_regression, newdata = bpf5)
+#bpf5 = 1327
+bcf5 <- tibble(Time = 89, Ramadan = 0, Seasonality = 5, `Average Beer Price*` = 1327)
+predict(beer_regression_beerprice_mult, newdata = bcf5, interval = "confidence", level = 0.95)
+#bcf5 = 52156516; 56519595; 60882674
+
+bpf6 <- data.frame(Time = 90, Ramadan = 0, Seasonality = 6)
+predict(beer_price_regression, newdata = bpf6)
+#bpf6 = 1291.23
+bcf6 <- tibble(Time = 90, Ramadan = 0, Seasonality = 6, `Average Beer Price*` = 1291.23)
+predict(beer_regression_beerprice_mult, newdata = bcf6, interval = "confidence", level = 0.95)
+#bcf6 = 57349010; 61580862; 65812714
+
+bpf7 <- data.frame(Time = 91, Ramadan = 0, Seasonality = 7)
+predict(beer_price_regression, newdata = bpf7)
+#bpf7 = 1324.813
+bcf7 <- tibble(Time = 91, Ramadan = 0, Seasonality = 7, `Average Beer Price*` = 1324.813)
+predict(beer_regression_beerprice_mult, newdata = bcf7, interval = "confidence", level = 0.95)
+#bcf7 = 67367020; 70913707; 74460395
+
+bpf8 <- data.frame(Time = 92, Ramadan = 0, Seasonality = 8)
+predict(beer_price_regression, newdata = bpf8)
+#bpf8 = 1286.23
+bcf8 <- tibble(Time = 92, Ramadan = 0, Seasonality = 8, `Average Beer Price*` = 1286.23)
+predict(beer_regression_beerprice_mult, newdata = bcf8, interval = "confidence", level = 0.95)
+#bcf8 = 72117835; 75794145; 79470454
+
+bpf9 <- data.frame(Time = 93, Ramadan = 0, Seasonality = 9)
+predict(beer_price_regression, newdata = bpf9)
+#bpf9 = 1242.707
+bcf9 <- tibble(Time = 93, Ramadan = 0, Seasonality = 9, `Average Beer Price*` = 1242.707)
+predict(beer_regression_beerprice_mult, newdata = bcf9, interval = "confidence", level = 0.95)
+#bcf9 = 52663017; 58235557; 63808096
+
+bpf10 <- data.frame(Time = 94, Ramadan = 0, Seasonality = 10)
+predict(beer_price_regression, newdata = bpf10)
+#bpf = 1240.116
+bcf10 <- tibble(Time = 94, Ramadan = 0, Seasonality = 10, `Average Beer Price*` = 1240.116)
+predict(beer_regression_beerprice_mult, newdata = bcf10, interval = "confidence", level = 0.95)
+#bcf10 = 47932732; 51874126; 55815520
+
+bpf11 <- data.frame(Time = 95, Ramadan = 0, Seasonality = 11)
+predict(beer_price_regression, newdata = bpf11)
+#bpf = 1222.618
+bcf11 <- tibble(Time = 95, Ramadan = 0, Seasonality = 11, `Average Beer Price*` = 1222.618)
+predict(beer_regression_beerprice_mult, newdata = bcf11, interval = "confidence", level = 0.95)
+#bcf11 = 36489518; 40534353; 44579188
+
+bpf12 <- data.frame(Time = 96, Ramadan = 0, Seasonality = 12)
+predict(beer_price_regression, newdata = bpf12)
+#bpf12 = 1256.666
+bcf12 <- tibble(Time = 96, Ramadan = 0, Seasonality = 12, `Average Beer Price*` = 1256.666)
+predict(beer_regression_beerprice_mult, newdata = bcf12, interval = "confidence", level = 0.95)
+#bcf12 = 39084834; 42431564; 45778295
+
+ts_table <- subset(all_data, select = -c(`Average Raki Price*`,
+                                         `Average Canned Soft Drink Price*`,
+                                         tourist_sum, combined_date.y,Czechoslovakia,Germany,
+                                         `The United Kingdom`,`The United States`,
+                                         France,`Others (Total)`, combined_date.x,
+                                         `Average Draft Beer Price*`,`Average Canned Beer Price*`,
+                                         Month.y, Year.y)) 
+                                          
+ts_table$date <- as.character(ts_table$date)
+class(ts_table$Year.x)
+ts_table$ForecastUL <- c(NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                         NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                         NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                         NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                         NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                         NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                         NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA)
+
+ts_table$ForecastLL <- c(NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                         NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                         NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                         NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                         NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                         NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA,
+                         NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA)
+
+
+predicted_data <- tibble(date = c("Jan 1994", "Feb 1994", "Mar 1994", 
+                                  "Apr 1994", "May 1994", "Jun 1994", 
+                                  "Jul 1994", "Aug 1994", "Sep 1994",
+                                  "Oct 1994", "Nov 1994", "Dec 1994"),
+                         Year.x = c(
+                                    "1994","1994","1994","1994","1994","1994",
+                                    "1994","1994","1994","1994","1994","1994"
+                                ),
+                         Month.x = c("January", "February", "March", "April",
+                                     "May", "June", "July", "August", "September",
+                                     "October", "November", "December"),
+                        `Beer Consumption  (lt)` = c(26671195, 10570184, 41235602,
+                                                      40200026, 56519595, 61580862,
+                                                      70913707,75794145,58235557,
+                                                      51874126, 40534353,42431564),
+                         `Average Beer Price*` = c(1290.221, 1185.616, 1182.357, 
+                                                   1353.013, 1327, 1291.23, 
+                                                   1324.813, 1286.23, 1242.707,
+                                                   1240.116, 1222.618, 1256.666),
+                         Ramadan = c(0,1,1,0,0,0,0,0,0,0,0,0),
+                         Time = 85:96,
+                         Seasonality = c(1,2,3,4,5,6,7,8,9,10,11,12),
+                         ForecastLL = c(22007551, 7693147, 32370330,
+                                        30954965, 52156516, 57349010, 
+                                        67367020, 72117835, 52663017, 
+                                        47932732, 36489518, 39084834),
+                         ForecastUL = c(31334839, 58833515, 50100873,
+                                        49445088, 60882674, 65812714,
+                                        74460395, 79470454, 63808096,
+                                        55815520,44579188,45778295))
+
+forecast <- rbind(tibble(ts_table, status = 'historical'),
+                  tibble(predicted_data, status = 'forecast'))
+forecast %>% ggplot(aes(x = Time, y = `Beer Consumption  (lt)`, linetype = status))
+
+
+forecast_series <- forecast %>%
+  mutate(combined_date = paste(Year.x, Month.x)) %>% 
+  mutate(Date = as.yearmon(combined_date, "%Y %B"))
+
+```
+
+Descriptive
+=====================================  
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+### Select Year
+
+```{r}
+
+selectInput("year_inp", " ", c(unique(overall_data$Year)))
+
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Beer Consumption Time Series (red line shows months that included Ramadan)
+
+```{r}
+
+renderPlot({
+    overall_data %>%
+      filter(Year == input$year_inp) %>%
+      ggplot(aes(date, `Beer Consumption  (lt)`, group = Year)) +
+      geom_line() +
+      geom_vline(xintercept = (overall_data %>% filter(Year == input$year_inp) %>% drop_na())$date,
+                 color = 'red', size = 5, alpha = 0.5) +
+      labs(title = paste("Beer Consumption in", input$year_inp),
+           x = "Year", y = "Average Beer Consumption") +
+      theme(axis.text = element_text(size = 15), axis.text.y = element_text(angle = 45, hjust = 1)) +
+      theme(axis.title = element_text(size = 25)) +
+      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+      panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+      scale_y_continuous(labels = comma)
+})
+
+```
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+### Average Tourism by Month
+
+```{r}
+
+ggplotly(ggplot(tourist_demand_month, aes(x = Month, y = avg_tourism_month)) +
+   geom_bar(stat = "identity", fill = "lightblue") +
+   theme(axis.text.x = element_text(angle = 45, hjust = 1),axis.title = element_text(size = 15)) +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+    panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+    scale_y_continuous(labels = comma) +
+   labs(x = "Month", y = "Average Tourism"))
+```
+
+### Average Drink Prices by Month
+
+```{r}
+
+ggplotly(
+  ggplot(combined_data, aes(x = Month)) +
+    geom_line(aes(y = `Average Beer Price`, colour = "Beer", group = 1)) +
+    geom_line(aes(y = `Average Raki Price`, colour = "Raki", group = 2)) +
+    geom_line(aes(y = `Average Soft Drink Price`, colour = "Soft Drink", group = 3)) +
+    scale_color_manual(values = c("red", "blue", "green")) +
+    labs(x = "Month", y = "Price (TL)", colour = " ") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    theme(axis.title = element_text(size = 15)) +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+    panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+    scale_y_continuous(labels = comma)
+)
+
+```
+
+
+Predictive
+=====================================  
+
+
+```{r}
+
+ggplotly(
+  ggplot(forecast_series, aes(x = Date)) + 
+    geom_line(aes(y = `Beer Consumption  (lt)`, color = "Historical Data")) +
+    geom_line(aes(y = ForecastUL, color = "Forecast Data"), linetype = "dashed") +
+    geom_ribbon(aes(ymin = ForecastLL, ymax = ForecastUL, fill = "forecast"), alpha = 0.25) +
+    labs(x = "Date", y = "Beer Consumption", color = "Legend") +
+    theme(axis.text.y = element_text(angle = 45, hjust = 1),
+          axis.text = element_text(size = 15),
+          axis.title = element_text(size = 25),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          axis.line = element_line(colour = "black"),
+          legend.title = element_blank()) +
+    scale_y_continuous(labels = comma)
+)
+
+```
